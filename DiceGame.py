@@ -1,10 +1,13 @@
 import tkinter as tk
 from tkinter import messagebox, font
+from tkinter import ttk
 from PIL import Image, ImageTk, ImageFont
 import random
 import sys
 import time
 from itertools import combinations
+import socket
+import threading
 
 # 骰子表情符号映射
 DICE_EMOJI = {
@@ -510,6 +513,7 @@ class StartUI:
             tk.Button(self.bet_window, text=label, command=lambda v=bet_values[i]: self.select_bet(v)).pack(pady=10)
 
     def select_bet(self, bet):
+        self.bet = bet  # 保存底注信息
         self.bet_window.withdraw()
         self.create_mode_window(bet)
 
@@ -523,7 +527,7 @@ class StartUI:
         ai_button = tk.Button(self.mode_window, text="和电脑玩家对战", command=lambda: self.start_ai_game(bet))
         ai_button.pack(pady=20)
 
-        online_button = tk.Button(self.mode_window, text="网络对战", command=self.show_online_alert)
+        online_button = tk.Button(self.mode_window, text="网络对战", command=self.show_online_lobby)
         online_button.pack(pady=20)
 
     def start_local_game(self, bet):
@@ -541,8 +545,294 @@ class StartUI:
     def show_about(self):
         messagebox.showinfo("关于", "游戏是在豆包AI和GitHub Copilot合作下完成的，游戏玩法参考了天国拯救系列。")
 
-    def show_online_alert(self):
-        messagebox.showinfo("提示", "网络对战正在开发中。")
+    def show_online_lobby(self):
+        self.mode_window.withdraw()
+        self.lobby_window = tk.Toplevel()
+        self.lobby_window.title("房间列表")
+
+        # 获取本机IP
+        hostname = socket.gethostname()
+        local_ip = socket.gethostbyname(hostname)
+        self.local_ip = local_ip  # 保存本机IP
+        self.local_name = hostname  # 保存本机名称
+        ip_label = tk.Label(self.lobby_window, text=f"本机IP: {local_ip}")
+        ip_label.pack(pady=10)
+
+        # 房间列表
+        columns = ("name", "host_ip", "status", "password")
+        self.room_treeview = ttk.Treeview(self.lobby_window, columns=columns, show="headings")
+        self.room_treeview.heading("name", text="房间名")
+        self.room_treeview.heading("host_ip", text="房主IP")
+        self.room_treeview.heading("status", text="状态")
+        self.room_treeview.heading("password", text="密码")
+        self.room_treeview.pack(pady=10)
+
+        # 搜索房间中标签
+        self.searching_label = tk.Label(self.lobby_window, text="搜索房间中...", font=("Arial", 12))
+        self.searching_label.pack(pady=10)
+
+        # 刷新房间列表
+        self.refresh_room_list()
+
+        # 创建房间按钮
+        create_room_button = tk.Button(self.lobby_window, text="创建房间", command=self.create_room)
+        create_room_button.pack(side=tk.LEFT, padx=10, pady=10)
+
+        # 加入房间按钮
+        join_room_button = tk.Button(self.lobby_window, text="加入房间", command=self.join_room)
+        join_room_button.pack(side=tk.LEFT, padx=10, pady=10)
+
+        # 刷新按钮
+        refresh_button = tk.Button(self.lobby_window, text="刷新", command=self.refresh_room_list)
+        refresh_button.pack(side=tk.LEFT, padx=10, pady=10)
+
+    def refresh_room_list(self):
+        # 清空列表
+        for item in self.room_treeview.get_children():
+            self.room_treeview.delete(item)
+
+        # 搜索房间信息
+        self.search_rooms()
+
+    def search_rooms(self):
+        self.search_attempts = 0
+        self.found_rooms = set()
+
+        def listen_for_broadcast():
+            udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            udp_socket.bind(("", 12345))
+
+            while True:
+                try:
+                    data, addr = udp_socket.recvfrom(1024)
+                    print(f"接收到广播数据: {data} 来自: {addr}")  # 调试信息
+                    room_info = eval(data.decode('utf-8'))
+                    if addr[0] not in self.found_rooms:
+                        self.found_rooms.add(addr[0])
+                        self.room_treeview.insert("", tk.END, values=(room_info["name"], room_info["host_ip"], room_info["status"], room_info["password"]))
+                        self.searching_label.config(text="")
+                        self.search_attempts = 0  # 重置搜索尝试次数
+                except Exception as e:
+                    print(f"接收广播数据时出错: {e}")  # 调试信息
+
+        def search():
+            if self.search_attempts < 5:
+                self.search_attempts += 1
+                self.searching_label.config(text=f"搜索房间中...（尝试 {self.search_attempts}/5）")
+                threading.Thread(target=listen_for_broadcast, daemon=True).start()
+                if not self.found_rooms:
+                    self.lobby_window.after(10000, search)
+            else:
+                self.searching_label.config(text="未找到房间")
+
+        # 打开大厅后立即搜索一次
+        search()
+        # 三秒后再搜索一次
+        self.lobby_window.after(3000, search)
+
+    def create_room(self):
+        self.create_room_window = tk.Toplevel()
+        self.create_room_window.title("创建房间")
+
+        # 获取本机IP
+        hostname = socket.gethostname()
+        local_ip = socket.gethostbyname(hostname)
+
+        # 房间名默认值
+        default_room_name = f"{hostname}的房间"
+
+        # IP输入框
+        tk.Label(self.create_room_window, text="IP:").pack(pady=5)
+        ip_entry = tk.Entry(self.create_room_window)
+        ip_entry.insert(0, local_ip)
+        ip_entry.config(state='readonly')
+        ip_entry.pack(pady=5)
+
+        # 房间名输入框
+        tk.Label(self.create_room_window, text="房间名:").pack(pady=5)
+        room_name_entry = tk.Entry(self.create_room_window)
+        room_name_entry.insert(0, default_room_name)
+        room_name_entry.pack(pady=5)
+
+        # 密码复选框和输入框
+        password_var = tk.BooleanVar()
+        password_check = tk.Checkbutton(self.create_room_window, text="需要密码", variable=password_var, command=lambda: password_entry.config(state='normal' if password_var.get() else 'disabled'))
+        password_check.pack(pady=5)
+        password_entry = tk.Entry(self.create_room_window, show="*")
+        password_entry.config(state='disabled')
+        password_entry.pack(pady=5)
+
+        # 确认创建按钮
+        confirm_button = tk.Button(self.create_room_window, text="确认创建", command=lambda: self.confirm_create_room(local_ip, room_name_entry.get(), password_var.get(), password_entry.get()))
+        confirm_button.pack(pady=10)
+
+        # 取消按钮
+        cancel_button = tk.Button(self.create_room_window, text="取消", command=self.create_room_window.destroy)
+        cancel_button.pack(pady=10)
+
+    def confirm_create_room(self, ip, room_name, need_password, password):
+        self.password = password  # 保存密码信息
+        self.host_ip = ip  # 保存主机IP
+        self.host_name = self.local_name  # 保存主机名称
+        self.create_room_window.destroy()
+        self.lobby_window.destroy()
+        self.show_room_window(ip, room_name, need_password, password, is_host=True)
+        self.broadcast_room_info(ip, room_name, need_password, password)
+
+    def broadcast_room_info(self, ip, room_name, need_password, password):
+        def broadcast():
+            udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            room_info = {
+                "name": room_name,
+                "host_ip": ip,
+                "status": "等待中",
+                "password": "是" if need_password else "否",
+                "bet": self.bet
+            }
+            while True:
+                udp_socket.sendto(str(room_info).encode('utf-8'), ('<broadcast>', 12345))
+                print(f"广播房间信息: {room_info}")  # 调试信息
+                time.sleep(3)
+
+        threading.Thread(target=broadcast, daemon=True).start()
+
+    def show_room_window(self, ip, room_name, need_password, password, is_host=False):
+        self.room_window = tk.Toplevel()
+        if is_host:
+            self.room_window.title("房主")
+        else:
+            self.room_window.title("客户端")
+
+        # 左侧显示本机电脑名或主机信息
+        if is_host:
+            tk.Label(self.room_window, text=f"主机: {self.local_name} ({ip})").pack(pady=10)
+        else:
+            tk.Label(self.room_window, text=f"主机: {self.host_name} ({self.host_ip})").pack(pady=10)
+
+        # 中间显示当前对局的底注大小
+        self.bet_label = tk.Label(self.room_window, text=f"底注: {self.bet}")
+        self.bet_label.pack(pady=10)
+
+        # 右侧显示其他玩家信息或虚位以待
+        self.player_label = tk.Label(self.room_window, text="虚位以待")
+        self.player_label.pack(pady=10)
+
+        # 单选框指示用户准备状态
+        self.ready_var = tk.BooleanVar()
+        self.ready_check = tk.Checkbutton(self.room_window, text="准备", variable=self.ready_var, state=tk.DISABLED if is_host else tk.NORMAL)
+        self.ready_check.pack(pady=10)
+
+        if is_host:
+            self.start_broadcasting(ip, room_name, need_password, password)
+            self.wait_for_connection()
+
+    def start_broadcasting(self, ip, room_name, need_password, password):
+        def broadcast():
+            udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            room_info = {
+                "name": room_name,
+                "host_ip": ip,
+                "status": "等待中",
+                "password": "是" if need_password else "否",
+                "bet": self.bet
+            }
+            while True:
+                udp_socket.sendto(str(room_info).encode('utf-8'), ('<broadcast>', 12345))
+                print(f"广播房间信息: {room_info}")  # 调试信息
+                time.sleep(3)
+
+        threading.Thread(target=broadcast, daemon=True).start()
+
+    def wait_for_connection(self):
+        def listen_for_connection():
+            tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            tcp_socket.bind(("", 12345))
+            tcp_socket.listen(1)
+
+            while True:
+                conn, addr = tcp_socket.accept()
+                data = conn.recv(1024).decode('utf-8')
+                print(f"接收到连接请求: {data} 来自: {addr}")  # 调试信息
+                request_info = eval(data)
+                if request_info["password"] == self.password:
+                    response_info = {
+                        "status": "确认连接",
+                        "host_ip": self.host_ip,
+                        "host_name": self.host_name,
+                        "bet": self.bet,
+                        "client_name": request_info["name"]
+                    }
+                    conn.send(str(response_info).encode('utf-8'))
+                    self.player_label.config(text=f"玩家: {request_info['name']} ({request_info['ip']})")
+                else:
+                    response_info = {
+                        "status": "密码错误"
+                    }
+                    conn.send(str(response_info).encode('utf-8'))
+                conn.close()
+
+        threading.Thread(target=listen_for_connection, daemon=True).start()
+
+    def join_room(self):
+        selected_item = self.room_treeview.selection()
+        if selected_item:
+            room_info = self.room_treeview.item(selected_item, "values")
+            self.host_ip = room_info[1]
+            self.host_name = room_info[0]
+            self.bet = room_info[2]
+            self.password_required = room_info[3] == "是"
+
+            if self.password_required:
+                self.ask_password()
+            else:
+                self.send_connection_request("")
+
+    def ask_password(self):
+        self.password_window = tk.Toplevel()
+        self.password_window.title("输入密码")
+
+        tk.Label(self.password_window, text="密码:").pack(pady=5)
+        self.password_entry = tk.Entry(self.password_window, show="*")
+        self.password_entry.pack(pady=5)
+
+        confirm_button = tk.Button(self.password_window, text="确认", command=lambda: self.send_connection_request(self.password_entry.get()))
+        confirm_button.pack(pady=10)
+
+    def send_connection_request(self, password):
+        if hasattr(self, 'password_window'):
+            self.password_window.destroy()
+        self.lobby_window.destroy()
+        self.show_room_window(self.host_ip, self.host_name, self.password_required, password, is_host=False)
+
+        def connect():
+            tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            tcp_socket.connect((self.host_ip, 12345))
+            request_info = {
+                "ip": self.local_ip,
+                "name": self.local_name,
+                "password": password
+            }
+            tcp_socket.send(str(request_info).encode('utf-8'))
+
+            data = tcp_socket.recv(1024).decode('utf-8')
+            response_info = eval(data)
+            if response_info["status"] == "确认连接":
+                self.player_label.config(text=f"玩家: {response_info['host_name']} ({response_info['host_ip']})")
+                self.bet_label.config(text=f"底注: {response_info['bet']}")
+            elif response_info["status"] == "密码错误":
+                messagebox.showerror("错误", "密码错误")
+                self.room_window.destroy()
+                self.show_online_lobby()
+            else:
+                messagebox.showerror("错误", "连接失败")
+                self.room_window.destroy()
+                self.show_online_lobby()
+
+        threading.Thread(target=connect, daemon=True).start()
 
 if __name__ == "__main__":
     root = tk.Tk()
