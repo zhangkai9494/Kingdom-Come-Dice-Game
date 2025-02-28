@@ -8,6 +8,8 @@ import time
 from itertools import combinations
 import socket
 import threading
+import json
+import os
 
 # 骰子表情符号映射
 DICE_EMOJI = {
@@ -19,19 +21,21 @@ DICE_EMOJI = {
     6: "⚅"
 }
 
+
+
+
 # 检查单个骰子是否有效计分
 def is_die_scoring(die, counts):
     if die == 1 or die == 5:
         return True
     if counts[die] >= 3:
         return True
-    # 检查顺子情况比较复杂，这里简化处理，暂不考虑部分顺子组成情况
     return False
 
 # 计算一次投掷的得分
 def calculate_score(dice):
     score = 0
-    counts = [0] * 7  # 用于记录每个点数出现的次数
+    counts = [0] * 7
     for die in dice:
         counts[die] += 1
 
@@ -474,23 +478,225 @@ class DiceGame:
     def _get_random_delay(self):
         return int(random.uniform(800, 1500))
 
-class StartUI:
+class UI_Core(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("DiceGame-天国拯救骰子游戏")
+        self.geometry("800x600")
+        self.resizable(False, False)
+        self.current_page = None
+        self.show_page(UI_Multiplayer)
+
+    def show_page(self, page_class, *args):
+        if self.current_page is not None:
+            self.current_page.destroy()
+        self.current_page = page_class(self, *args)
+        self.current_page.pack(fill="both", expand=True)
+
+    @staticmethod
+    def load_background_image(parent, image_path):
+        if hasattr(parent, 'bg_label'):
+            return  # 如果背景图片已经加载过，则不再重新加载
+        try:
+            bg_image = Image.open(image_path)
+            bg_photo = ImageTk.PhotoImage(bg_image)
+            parent.bg_label = tk.Label(parent, image=bg_photo)
+            parent.bg_label.image = bg_photo  # 保持引用，防止被垃圾回收
+            parent.bg_label.place(x=0, y=0, relwidth=1, relheight=1)
+        except Exception as e:
+            print(f"加载背景图片时出错: {e}")
+
+class UI_MainMenu(tk.Frame):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.parent = parent
+        self.parent.title("DiceGame-天国拯救骰子游戏")
+
+        # 加载背景图片
+        UI_Core.load_background_image(self, "StartUI.png")
+
+        # 创建按钮
+        button_font = ("Huiwen-mincho", 30)  # 放大字体
+        single_game_button = tk.Button(self, text="单人游戏", font=button_font, command=lambda: parent.show_page(UI_SingleGame))
+        single_game_button.place(x=555, y=230, width=180, height=60)
+
+        multiplayer_button = tk.Button(self, text="多人游戏", font=button_font, command=lambda: parent.show_page(UI_Multiplayer))
+        multiplayer_button.place(x=555, y=310, width=180, height=60)
+
+        about_button = tk.Button(self, text="关于", font=button_font, command=lambda: parent.show_page(UI_About))
+        about_button.place(x=555, y=390, width=180, height=60)
+
+        exit_button = tk.Button(self, text="退出游戏", font=button_font, command=parent.destroy)
+        exit_button.place(x=555, y=470, width=180, height=60)
+
+        # 显示版本号和build号
+        build_number = time.strftime("Build %Y%m%d%H%M%S", time.localtime())
+        version_build_text = f"v1.3 beta | {build_number}"
+        version_build_label = tk.Label(self, text=version_build_text, font=("Arial", 8, "bold"), bg="black", fg="white")
+        version_build_label.place(x=0, y=583)
+
+    def load_background_image(self):
+        if hasattr(self, 'bg_label'):
+            return  # 如果背景图片已经加载过，则不再重新加载
+        try:
+            self.bg_image = Image.open("StartUI.png")
+            self.bg_photo = ImageTk.PhotoImage(self.bg_image)
+            self.bg_label = tk.Label(self, image=self.bg_photo)
+            self.bg_label.place(x=0, y=0, relwidth=1, relheight=1)
+        except Exception as e:
+            print(f"加载背景图片时出错: {e}")
+
+class UI_SingleGame(tk.Frame):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.parent = parent
+
+        # 加载背景图片
+        UI_Core.load_background_image(self, os.path.join("UI_Sources", "game_config_background.png"))
+
+        bet_frame = tk.LabelFrame(self, text="底注大小", font=("Huiwen-mincho", 15), bg="#613819", fg="white")
+        bet_frame.place(x=86, y=147, width=126, height=244)
+
+        self.bet_var = tk.IntVar(value=1000)  # 默认选择第一个元素
+        bet_options = [("乞丐\n[1000分]", 1000), ("农民\n[2000分]", 2000), ("骑士\n[4000分]", 4000), ("国王\n[8000分]", 8000)]
+        y_position = 5
+        x_position = 5
+        for text, value in bet_options:
+            tk.Radiobutton(
+            bet_frame, 
+            text=text, 
+            variable=self.bet_var, 
+            value=value, 
+            font=("Huiwen-mincho", 14), 
+            command=self.update_image,
+            bg="#613819",
+            fg="white",
+            selectcolor="#613819",  # 设置选中项目的背景色与父容器一致
+            activebackground="#613819"  # 设置选中项目的活动背景色与父容器一致
+            ).place(x=x_position, y=y_position)
+            y_position += 50
+
+        difficulty_frame = tk.LabelFrame(self, text="AI难度", font=("Huiwen-mincho", 15), bg="#613819", fg="white")
+        difficulty_frame.place(x=590, y=147, width=126, height=230)
+
+        self.ai_difficulty_var = tk.StringVar(value="easy")  # 默认选择第一个元素
+        ai_difficulty_options = [("简单", "easy"), ("中等", "medium"), ("困难", "hard")]
+        y_position = 25
+        x_position = 20
+        for text, value in ai_difficulty_options:
+            tk.Radiobutton(
+            difficulty_frame, 
+            text=text, 
+            variable=self.ai_difficulty_var, 
+            value=value, 
+            font=("Huiwen-mincho", 16),
+            bg="#613819",
+            fg="white",
+            selectcolor="#613819",  # 设置选中项目的背景色与父容器一致
+            activebackground="#613819"  # 设置选中项目的活动背景色与父容器一致
+            ).place(x=x_position, y=y_position)
+            y_position += 50
+
+        # 中间区域：用于显示图片
+        self.image_label = tk.Label(self)
+        self.image_label.place(x=300, y=88, width=200, height=344)
+
+        # 左下角：返回主菜单按钮
+        back_button = tk.Button(self, text="返回主菜单", font=("Huiwen-mincho", 16), command=lambda: parent.show_page(UI_MainMenu))
+        back_button.place(x=23, y=530, width=160, height=40)
+
+        # 右下角：确认对局按钮
+        confirm_button = tk.Button(self, text="确认对局", font=("Huiwen-mincho", 16), command=self.confirm_game)
+        confirm_button.place(x=610, y=530, width=160, height=40)
+
+        # 初始化图片
+        self.update_image()
+
+    def update_image(self):
+        bet = self.bet_var.get()
+        image_path = os.path.join("UI_Sources", f"bet_{bet}.png")
+        try:
+            image = Image.open(image_path)
+            photo = ImageTk.PhotoImage(image)
+            self.image_label.config(image=photo)
+            self.image_label.image = photo  # 保持引用，防止被垃圾回收
+        except Exception as e:
+            print(f"加载图片时出错: {e}")
+
+    def confirm_game(self):
+        bet = self.bet_var.get()
+        ai_difficulty = self.ai_difficulty_var.get()
+        # 跳转到游戏页面，具体实现可以在这里添加
+        print(f"确认对局：底注大小={bet}, AI难度={ai_difficulty}")
+
+
+class UI_Multiplayer(tk.Frame):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.parent = parent
+
+        # 加载背景图片
+        UI_Core.load_background_image(self, os.path.join("UI_Sources", "multgame_config_background.png"))
+
+        # 加载按钮背景图片
+        self.local_game_image = ImageTk.PhotoImage(Image.open(os.path.join("UI_Sources", "bet_1000.png")))
+        # self.lan_game_image = ImageTk.PhotoImage(Image.open(os.path.join("UI_Sources", "lan_game_button.png")))
+
+        # 创建按钮
+        button_font = ("Huiwen-mincho", 30)  # 放大字体
+
+        local_game_button = tk.Button(self, text="本地对局", font=button_font, image=self.local_game_image, command=self.start_local_game)
+        local_game_button.place(x=100, y=200, width=250, height=100)
+
+        lan_game_button = tk.Button(self, text="局域网联机", font=button_font, command=self.start_lan_game)
+        lan_game_button.place(x=450, y=200, width=250, height=100)
+
+        # 左下角：返回主菜单按钮
+        back_button = tk.Button(self, text="返回主菜单", font=("Huiwen-mincho", 16), command=lambda: parent.show_page(UI_MainMenu))
+        back_button.place(x=20, y=540, width=160, height=40)
+
+    def start_local_game(self):
+        # 启动本地对局的逻辑
+        print("启动本地对局")
+
+    def start_lan_game(self):
+        # 启动局域网联机的逻辑
+        print("启动局域网联机")
+
+class UI_About(tk.Frame):
+    def __init__(self, parent):
+        super().__init__(parent)
+
+
+class UI_Config:
     def __init__(self, root):
         self.root = root
-        self.root.title("游戏启动界面")
+        self.root.title("DiceGame-天国拯救骰子游戏")
+        self.root.geometry("800x600")
+        self.root.resizable(False, False)
 
         # 加载背景图片
         self.load_background_image()
 
         # 创建按钮
-        start_button = tk.Button(root, text="开始游戏", command=self.start_game)
-        start_button.pack(pady=20)
+        button_font = ("Huiwen-mincho", 30)  # 放大字体
+        single_game_button = tk.Button(root, text="单人游戏", font=button_font, command=self.start_game)
+        single_game_button.place(x=555, y=230, width=180, height=60)
 
-        about_button = tk.Button(root, text="关于", command=self.show_about)
-        about_button.pack(pady=20)
+        multiplayer_button = tk.Button(root, text="多人游戏", font=button_font, command=self.start_game)
+        multiplayer_button.place(x=555, y=310, width=180, height=60)
 
-        exit_button = tk.Button(root, text="退出游戏", command=root.destroy)
-        exit_button.pack(pady=20)
+        about_button = tk.Button(root, text="关于", font=button_font, command=self.show_about)
+        about_button.place(x=555, y=390, width=180, height=60)
+
+        exit_button = tk.Button(root, text="退出游戏", font=button_font, command=root.destroy)
+        exit_button.place(x=555, y=470, width=180, height=60)
+
+        # 显示版本号和build号
+        build_number = time.strftime("Build %Y%m%d%H%M%S", time.localtime())
+        version_build_text = f"v1.3 beta | {build_number}"
+        version_build_label = tk.Label(root, text=version_build_text, font=("Arial", 8, "bold"), bg="black", fg="white")
+        version_build_label.place(x=0, y=583)
 
     def load_background_image(self):
         try:
@@ -585,6 +791,13 @@ class StartUI:
         # 刷新按钮
         refresh_button = tk.Button(self.lobby_window, text="刷新", command=self.refresh_room_list)
         refresh_button.pack(side=tk.LEFT, padx=10, pady=10)
+
+        self.room_treeview.bind("<Double-1>", self.on_room_double_click)
+
+    def on_room_double_click(self, event):
+        selected_item = self.room_treeview.selection()
+        if selected_item:
+            self.join_room()
 
     def refresh_room_list(self):
         # 清空列表
@@ -725,6 +938,15 @@ class StartUI:
         self.ready_check = tk.Checkbutton(self.room_window, text="准备", variable=self.ready_var, state=tk.DISABLED if is_host else tk.NORMAL)
         self.ready_check.pack(pady=10)
 
+        # 退出房间按钮
+        self.exit_button = tk.Button(self.room_window, text="退出房间", command=self.confirm_exit_room)
+        self.exit_button.pack(pady=10)
+
+        # 开始游戏按钮（仅房主可用）
+        if is_host:
+            self.start_game_button = tk.Button(self.room_window, text="开始游戏", command=self.start_game)
+            self.start_game_button.pack(pady=10)
+
         if is_host:
             self.start_broadcasting(ip, room_name, need_password, password)
             self.wait_for_connection()
@@ -757,22 +979,30 @@ class StartUI:
                 conn, addr = tcp_socket.accept()
                 data = conn.recv(1024).decode('utf-8')
                 print(f"接收到连接请求: {data} 来自: {addr}")  # 调试信息
-                request_info = eval(data)
-                if request_info["password"] == self.password:
-                    response_info = {
-                        "status": "确认连接",
-                        "host_ip": self.host_ip,
-                        "host_name": self.host_name,
-                        "bet": self.bet,
-                        "client_name": request_info["name"]
-                    }
-                    conn.send(str(response_info).encode('utf-8'))
-                    self.player_label.config(text=f"玩家: {request_info['name']} ({request_info['ip']})")
-                else:
-                    response_info = {
-                        "status": "密码错误"
-                    }
-                    conn.send(str(response_info).encode('utf-8'))
+                request_info = json.loads(data)  # 使用 json.loads
+                if request_info.get("type") == "join_room":
+                    if request_info["password"] == self.password:
+                        response_info = {
+                            "status": "确认连接",
+                            "host_ip": self.host_ip,
+                            "host_name": self.host_name,
+                            "bet": self.bet,
+                            "client_name": request_info["name"]
+                        }
+                        conn.send(json.dumps(response_info).encode('utf-8'))  # 使用 json.dumps
+                        self.player_label.config(text=f"玩家: {request_info['name']} ({request_info['ip']})")
+                    else:
+                        response_info = {
+                            "status": "密码错误"
+                        }
+                        conn.send(json.dumps(response_info).encode('utf-8'))  # 使用 json.dumps
+                elif request_info.get("type") == "close_room":
+                    self.room_window.destroy()
+                    self.show_online_lobby()
+                    messagebox.showinfo("提示", "房主已离开游戏！")
+                    break
+                elif request_info.get("type") == "exit_room":
+                    self.player_label.config(text="虚位以待")
                 conn.close()
 
         threading.Thread(target=listen_for_connection, daemon=True).start()
@@ -791,6 +1021,38 @@ class StartUI:
             else:
                 self.send_connection_request("")
 
+    def send_connection_request(self, password):
+        if hasattr(self, 'password_window'):
+            self.password_window.destroy()
+        self.lobby_window.destroy()
+        self.show_room_window(self.host_ip, self.host_name, self.password_required, password, is_host=False)
+
+        def connect():
+            tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            tcp_socket.connect((self.host_ip, 12345))
+            request_info = {
+                "type": "join_room",  # 确保包含 type 键
+                "ip": self.local_ip,
+                "name": self.local_name,
+                "password": password
+            }
+            tcp_socket.send(json.dumps(request_info).encode('utf-8'))  # 使用 json.dumps
+
+            data = tcp_socket.recv(1024).decode('utf-8')
+            response_info = json.loads(data)  # 使用 json.loads
+            if response_info["status"] == "确认连接":
+                self.player_label.config(text=f"玩家: {response_info['host_name']} ({response_info['host_ip']})")
+                self.bet_label.config(text=f"底注: {response_info['bet']}")
+            elif response_info["status"] == "密码错误":
+                messagebox.showerror("错误", "密码错误")
+                self.room_window.destroy()
+                self.show_online_lobby()
+            else:
+                messagebox.showerror("错误", "连接失败")
+                self.room_window.destroy()
+                self.show_online_lobby()
+
+        threading.Thread(target=connect, daemon=True).start()
     def ask_password(self):
         self.password_window = tk.Toplevel()
         self.password_window.title("输入密码")
@@ -834,7 +1096,40 @@ class StartUI:
 
         threading.Thread(target=connect, daemon=True).start()
 
+    def confirm_exit_room(self):
+        if messagebox.askyesno("确认", "你确定要退出房间吗？"):
+            if self.is_host:
+                self.send_close_room_signal()
+            else:
+                self.send_exit_room_signal()
+            self.room_window.destroy()
+            self.show_online_lobby()
+
+    def send_close_room_signal(self):
+        tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        tcp_socket.connect((self.host_ip, 12345))
+        close_info = {
+            "type": "close_room"
+        }
+        tcp_socket.send(json.dumps(close_info).encode('utf-8'))  # 使用 json.dumps
+        tcp_socket.close()
+
+    def send_exit_room_signal(self):
+        tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        tcp_socket.connect((self.host_ip, 12345))
+        exit_info = {
+            "type": "exit_room",
+            "ip": self.local_ip,
+            "name": self.local_name
+        }
+        tcp_socket.send(json.dumps(exit_info).encode('utf-8'))  # 使用 json.dumps
+        tcp_socket.close()
+
+# if __name__ == "__main__":
+#     root = tk.Tk()
+#     start_ui = UI_Config(root)
+#     root.mainloop()
+
 if __name__ == "__main__":
-    root = tk.Tk()
-    start_ui = StartUI(root)
-    root.mainloop()
+    app = UI_Core()
+    app.mainloop()
